@@ -7,18 +7,10 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 
-from typing import Dict, Any, Union
-
-from fastapi import Depends, HTTPException
-from fastapi.requests import Request
-from fastapi.security import APIKeyCookie
+from typing import Dict, Any
 
 from src.core.const import _genv
-from src.database import db, AsyncSession
 from src.core.security.models import CabaleSettings
-
-from sqlalchemy.future import select
-
 
 class CabaleTokenManager:
     """
@@ -30,10 +22,14 @@ class CabaleTokenManager:
         Initialize the CabaleTokenManager with settings.
 
         Parameters:
-            settings: An instance of CabaleSettings containing the encryption key.
+            settings (CabaleSettings): An instance of CabaleSettings containing the encryption key.
         """
         self.settings = settings
-        
+    
+    def _iat(self) -> float:
+        """Returns POSIX time"""
+        return d.datetime.now(d.timezone.utc).timestamp()    
+    
     def _generate_key(self) -> bytes:
         """
         Generate a 32-byte key from the secret key.
@@ -62,7 +58,7 @@ class CabaleTokenManager:
         key = self._generate_key()
         
         data['id'] = uuid
-        data['iat'] = d.datetime.now(d.timezone.utc).timestamp()
+        data['iat'] = self._iat()
         
         json_data = json.dumps(data)
         json_data = json_data.encode()
@@ -121,9 +117,4 @@ cabale = CabaleTokenManager(
     CabaleSettings(
         key=_genv("SECRET_KEY")
     )
-)
-api_cabale = APIKeyCookie(
-    name="cabale",
-    scheme_name="cabale_cookie",
-    description="The cookie for Cabale authentication"
 )
