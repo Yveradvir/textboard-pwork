@@ -110,7 +110,6 @@ class CabaleTokenManager:
 
             return data_dict
         except Exception as e:
-            print(e)
             return {"detail": str(e)}
                 
 cabale = CabaleTokenManager(

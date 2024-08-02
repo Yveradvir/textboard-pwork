@@ -11,18 +11,15 @@ from src.core.utils.get_scalar import get_scalar
 from src.database import db
 from src.database.user import UserTable
 
-
-
 router = APIRouter(prefix="/a", tags=["auth"])
 
 @router.post("/signin")
 async def auth_signin(
-    request: Request,
     body: AuthBodyModel,
-    db: AsyncSession = Depends(db.get_session)
+    session: AsyncSession = Depends(db.get_session)
 ):
     user = await get_scalar(
-        db,
+        session,
         select(UserTable).where(UserTable.username == body.username)
     )
 
@@ -32,9 +29,60 @@ async def auth_signin(
             detail="Invalid username or password"
         )
 
-    cabale_token = "example_token"  
+    iv = cabale_auth.generate_iv()
+    user.iv = iv
+    await session.commit()
     
-    return JSONResponse(
+    print(iv, cabale_auth.decode_iv(iv))
+    cabale_token = cabale.generate_cabale_token({}, str(user.id), cabale_auth.decode_iv(iv))  
+    response = JSONResponse(
         content={"cabale": cabale_token},
         status_code=200
     )
+    
+    cabale_auth.set_cabale(response, cabale_token)
+    
+    return response
+
+@router.post("/signup")
+async def auth_signup(
+    body: AuthBodyModel,
+    session: AsyncSession = Depends(db.get_session)
+):
+    user_check = await get_scalar(
+        session,
+        select(UserTable).where(UserTable.username == body.username)
+    )
+
+    if user_check is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This username is arleady taken"
+        )
+
+    iv = cabale_auth.generate_iv()
+
+    body = body.model_dump()
+    body["iv"] = iv
+    body["password"] = Hash.get_password_hash(body["password"])
+    
+    user = UserTable(**body)
+
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    
+    print(iv, cabale_auth.decode_iv(user.iv))
+    cabale_token = cabale.generate_cabale_token({}, str(user.id), cabale_auth.decode_iv(user.iv))  
+    response = JSONResponse(
+        content={"cabale": cabale_token},
+        status_code=200
+    )
+    
+    cabale_auth.set_cabale(response, cabale_token)
+    
+    return response
+
+@router.get("/", dependencies=[Depends(cabale_auth.cabale_cookie_required)])
+def _(request: Request):
+    return JSONResponse(request.state.cabale)

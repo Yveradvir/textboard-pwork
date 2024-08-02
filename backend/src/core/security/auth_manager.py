@@ -8,15 +8,16 @@ from fastapi.requests import Request
 from fastapi.responses import Response
 from fastapi.security import APIKeyCookie
 
+from src.core.utils.get_scalar import get_scalar
+
 from src.database import db
 from src.database.user import UserTable
 from src.core.security.cabale_manager import cabale
 
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
 
 api_cabale = APIKeyCookie(
-    name="cabale",
+    name="cabale_token",
     scheme_name="cabale_cookie",
     description="The cookie for Cabale authentication"
 )
@@ -31,7 +32,11 @@ class CabaleAuthManager:
     def generate_iv(self) -> str:
         """Generate a random initialization vector (IV) for encryption."""
         return b64encode(urandom(16)).decode()
-        
+    
+    def decode_iv(self, iv: str) -> bytes:
+        """Decode generated initialization vector (IV) for next token creation."""    
+        return b64decode(iv)
+    
     async def get_user(self, uuid: str) -> UserTable:
         """
         Retrieve a user instance from the database by UUID.
@@ -49,17 +54,16 @@ class CabaleAuthManager:
                 400, "Invalid UUID was provided."
             )
         
-        scalar: UserTable = (await db.execute(
-            select(UserTable)
-                .where(UserTable.id == uuid)
-                .options(selectinload("*"))
-        )).scalar_one_or_none()
+        async with db.session() as session:
+            query = select(UserTable).where(UserTable.id == uuid)
+            result = await session.execute(query)
+            scalar: UserTable = result.scalar_one_or_none()
 
-        if not scalar:
-            raise HTTPException(401, "Invalid user ID was provided.")
+            if not scalar:
+                raise HTTPException(401, "Invalid user ID was provided.")
 
-        return scalar
-    
+            return scalar
+        
     async def cabale_cookie_required(
         self, request: Request, 
         cabale_token: Union[str, None] = Depends(api_cabale)
@@ -74,20 +78,20 @@ class CabaleAuthManager:
         if not cabale_token:
             raise HTTPException(401, "No Cabale token provided.")
         
+        print(cabale_token)
         user: UserTable = await self.get_user(cabale_token.split(":@:")[0])
-        verified = cabale.verify_cabale_token(cabale_token, b64decode(user.iv))
+        verified = cabale.verify_cabale_token(cabale_token, self.decode_iv(user.iv))
         _g = lambda key: verified.get(key, str)
         
-        if not _g("uuid") and not _g("iat"):
-            raise HTTPException(500, _g("detail"))
+        if list(verified.keys()) == ["detail"]:
+            raise HTTPException(500, verified)
         
         if cabale._iat() - _g("iat") >= cabale.settings.max_age:
             raise HTTPException(401, "Expired credential.")
         
         request.state.cabale = verified
-        request.state.user = user.to_dict()
         
-    def set_pair(
+    def set_cabale(
         self, response: Response, 
         cabale_token: str
     ) -> None:

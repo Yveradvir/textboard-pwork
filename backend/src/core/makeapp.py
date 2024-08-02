@@ -2,6 +2,8 @@ from fastapi import FastAPI
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.routes import auth
+
 def makeapp(lifespan) -> FastAPI:
     """
         Function that makes instance of FastAPI and sets it up.
@@ -24,5 +26,7 @@ def makeapp(lifespan) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["*"],
     ) # this line allows provided methods and header only from allow_origins
+    
+    app.include_router(auth.router.router)
     
     return app
